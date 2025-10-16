@@ -1,10 +1,19 @@
+import telebot
+import sqlite3
+import random
+import time
+import threading
+from datetime import datetime
+import logging
+import os
+import sys
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler()
+        logging.StreamHandler()  # Убираем FileHandler для Render
     ]
 )
 
@@ -14,40 +23,11 @@ BOT_TOKEN = "8322357889:AAGmu3y8_2YZ-s_sE__7A_pNSa-q_hwKh2I"
 # Создаем бота
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Файл блокировки для предотвращения множественных запусков
-LOCK_FILE = "bot.lock"
-
-
-def create_lock_file():
-    """Создает файл блокировки"""
-    try:
-        with open(LOCK_FILE, 'w') as f:
-            f.write(str(os.getpid()))
-        return True
-    except:
-        return False
-
-
-def remove_lock_file():
-    """Удаляет файл блокировки"""
-    try:
-        if os.path.exists(LOCK_FILE):
-            os.remove(LOCK_FILE)
-    except:
-        pass
-
-
-def check_single_instance():
-    """Проверяет, что запущен только один экземпляр бота"""
-    if os.path.exists(LOCK_FILE):
-        logging.error("Бот уже запущен! Завершите предыдущий экземпляр.")
-        return False
-    return create_lock_file()
-
-
 # База данных
 def init_db():
-    conn = sqlite3.connect('hearts.db')
+    # На Render используем /tmp для записи файлов
+    db_path = '/tmp/hearts.db'
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -61,10 +41,9 @@ def init_db():
     conn.close()
     logging.info("База данных инициализирована")
 
-
 # Получить количество сердец
 def get_hearts(user_id):
-    conn = sqlite3.connect('hearts.db')
+    conn = sqlite3.connect('/tmp/hearts.db')
     cursor = conn.cursor()
     cursor.execute('SELECT hearts FROM users WHERE user_id = ?', (user_id,))
     result = cursor.fetchone()
@@ -78,10 +57,9 @@ def get_hearts(user_id):
     conn.close()
     return hearts
 
-
 # Добавить сердце
 def add_heart(user_id, username):
-    conn = sqlite3.connect('hearts.db')
+    conn = sqlite3.connect('/tmp/hearts.db')
     cursor = conn.cursor()
     hearts = get_hearts(user_id) + 1
     cursor.execute('UPDATE users SET hearts = ?, username = ? WHERE user_id = ?',
@@ -89,7 +67,6 @@ def add_heart(user_id, username):
     conn.commit()
     conn.close()
     return hearts
-
 
 # Мотивационные фразы для Ольги (расширенный список)
 MOTIVATIONAL_PHRASES = [
@@ -145,12 +122,13 @@ MOTIVATIONAL_PHRASES = [
     "Доброе утро, моя фея! 🧚‍♀️ Твори волшебство своими добрыми делами!",
 ]
 
-# Сообщения для разных времен
+# Сообщения для разных времен (UTC время для Render)
 TIME_MESSAGES = {
-    14: "Я тебя люблю ❤️",
-    18: "Ты самая яркая ✨",
-    20: "Приятных тебе снов 🌙💫",
-    3: "Знаю что ты спишь, просто люблю тебя 😴💕"
+    7: "Я тебя люблю ❤️",           # 10:00 МСК
+    11: "Ты самая яркая ✨",         # 14:00 МСК
+    15: "Приятных тебе снов 🌙💫",  # 18:00 МСК  
+    17: "Спокойной ночи, солнышко 😴", # 20:00 МСК
+    0: "Знаю что ты спишь, просто люблю тебя 💕" # 03:00 МСК
 }
 
 # Триггеры и ответы
@@ -364,16 +342,16 @@ def send_scheduled_messages():
 
     while True:
         try:
-            now = datetime.now()
+            now = datetime.utcnow()  # Используем UTC время для Render
             current_hour = now.hour
             current_minute = now.minute
 
             # Проверяем все времена для отправки (в начале часа)
             if current_minute == 0:
                 if current_hour in TIME_MESSAGES and last_sent_hours.get(current_hour) != now.day:
-                    logging.info(f"Отправка сообщения для времени {current_hour}:00")
+                    logging.info(f"Отправка сообщения для времени {current_hour}:00 UTC")
 
-                    conn = sqlite3.connect('hearts.db')
+                    conn = sqlite3.connect('/tmp/hearts.db')
                     cursor = conn.cursor()
                     cursor.execute('SELECT user_id FROM users')
                     users = cursor.fetchall()
@@ -385,17 +363,17 @@ def send_scheduled_messages():
                         user_id = user_tuple[0]
                         try:
                             bot.send_message(user_id, message_text, reply_markup=create_main_keyboard())
-                            logging.info(f"Сообщение в {current_hour}:00 отправлено пользователю {user_id}")
+                            logging.info(f"Сообщение в {current_hour}:00 UTC отправлено пользователю {user_id}")
                         except Exception as e:
                             logging.error(f"Ошибка отправки пользователю {user_id}: {e}")
 
                     last_sent_hours[current_hour] = now.day
 
-            # Ежедневная мотивация в 10:00
-            if current_hour == 10 and current_minute == 0 and last_sent_hours.get('motivation') != now.day:
+            # Ежедневная мотивация в 7:00 UTC (10:00 МСК)
+            if current_hour == 7 and current_minute == 0 and last_sent_hours.get('motivation') != now.day:
                 logging.info("Отправка ежедневных мотивационных сообщений...")
 
-                conn = sqlite3.connect('hearts.db')
+                conn = sqlite3.connect('/tmp/hearts.db')
                 cursor = conn.cursor()
                 cursor.execute('SELECT user_id FROM users')
                 users = cursor.fetchall()
@@ -422,14 +400,8 @@ def send_scheduled_messages():
 
 # Запуск бота с обработкой ошибок
 def run_bot():
-    # Проверяем, что запущен только один экземпляр
-    if not check_single_instance():
-        logging.error("Не удалось запустить бота: уже запущен другой экземпляр!")
-        print("❌ ОШИБКА: Бот уже запущен! Завершите предыдущую версию.")
-        sys.exit(1)
-
     try:
-        logging.info("Запуск бота в автономном режиме...")
+        logging.info("Запуск бота в автономном режиме на Render...")
         init_db()
 
         # Запускаем поток для расписания сообщений
@@ -437,11 +409,11 @@ def run_bot():
         schedule_thread.daemon = True
         schedule_thread.start()
 
-        logging.info("🤖 Бот запущен в АВТОНОМНОМ режиме 24/7!")
+        logging.info("🤖 Бот запущен в АВТОНОМНОМ режиме 24/7 на Render!")
         print("=" * 60)
         print("🤖 БОТ ЗАПУЩЕН В АВТОНОМНОМ РЕЖИМЕ!")
-        print("💫 Теперь он будет работать постоянно")
-        print("🕐 Расписание: 10:00, 14:00, 18:00, 20:00, 03:00")
+        print("💫 Теперь он будет работать постоянно на Render")
+        print("🕐 Расписание (по Москве): 10:00, 14:00, 18:00, 20:00, 03:00")
         print("⏹️ Для остановки нажмите Ctrl+C")
         print("=" * 60)
 
@@ -456,20 +428,7 @@ def run_bot():
 
     except Exception as e:
         logging.error(f"Критическая ошибка бота: {e}")
-    finally:
-        # Всегда удаляем файл блокировки при завершении
-        remove_lock_file()
-        logging.info("Бот остановлен")
 
 
 if __name__ == "__main__":
-    # Обработка Ctrl+C для graceful shutdown
-    try:
-        run_bot()
-    except KeyboardInterrupt:
-        print("\n🛑 Остановка бота...")
-        remove_lock_file()
-        print("👋 Бот остановлен!")
-    except Exception as e:
-        print(f"❌ Критическая ошибка: {e}")
-        remove_lock_file()
+    run_bot()
