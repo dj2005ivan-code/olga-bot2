@@ -7,27 +7,42 @@ from datetime import datetime
 import logging
 import os
 import sys
+import requests
+from flask import Flask
+
+# Создаем Flask app для поддержания активности
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 Бот для Ольги работает!"
+
+def keep_alive():
+    """Запускает Flask сервер в отдельном потоке"""
+    def run():
+        app.run(host='0.0.0.0', port=8080)
+    t = threading.Thread(target=run)
+    t.daemon = True
+    t.start()
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler()  # Убираем FileHandler для Render
+        logging.StreamHandler()
     ]
 )
 
-# ТОКЕН БОТА - ЗАМЕНИТЕ НА СВОЙ!
-BOT_TOKEN = "8322357889:AAGmu3y8_2YZ-s_sE__7A_pNSa-q_hwKh2I"
+# ТОКЕН БОТА из переменных окружения Replit
+BOT_TOKEN = os.environ['BOT_TOKEN']
 
 # Создаем бота
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# База данных
+# База данных (на Replit используем обычный путь)
 def init_db():
-    # На Render используем /tmp для записи файлов
-    db_path = '/tmp/hearts.db'
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect('hearts.db')
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -43,7 +58,7 @@ def init_db():
 
 # Получить количество сердец
 def get_hearts(user_id):
-    conn = sqlite3.connect('/tmp/hearts.db')
+    conn = sqlite3.connect('hearts.db')
     cursor = conn.cursor()
     cursor.execute('SELECT hearts FROM users WHERE user_id = ?', (user_id,))
     result = cursor.fetchone()
@@ -59,7 +74,7 @@ def get_hearts(user_id):
 
 # Добавить сердце
 def add_heart(user_id, username):
-    conn = sqlite3.connect('/tmp/hearts.db')
+    conn = sqlite3.connect('hearts.db')
     cursor = conn.cursor()
     hearts = get_hearts(user_id) + 1
     cursor.execute('UPDATE users SET hearts = ?, username = ? WHERE user_id = ?',
@@ -122,7 +137,7 @@ MOTIVATIONAL_PHRASES = [
     "Доброе утро, моя фея! 🧚‍♀️ Твори волшебство своими добрыми делами!",
 ]
 
-# Сообщения для разных времен (UTC время для Render)
+# Сообщения для разных времен (UTC время для Replit)
 TIME_MESSAGES = {
     7: "Я тебя люблю ❤️",           # 10:00 МСК
     11: "Ты самая яркая ✨",         # 14:00 МСК
@@ -146,7 +161,6 @@ TRIGGERS = {
     "устала": "Моя хорошая, ты так много стараешься! 🥺 Помни, что отдых - это тоже важная работа 💕 Приляг, отдохни, а я буду думать о тебе и посылать тебе силы и энергию! ✨ Ты заслуживаешь самого лучшего отдыха! 🌙"
 }
 
-
 # Основная клавиатура (всегда видна)
 def create_main_keyboard():
     keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -155,14 +169,12 @@ def create_main_keyboard():
     keyboard.add(button1, button2)
     return keyboard
 
-
 # Клавиатура для подтверждения мотивации
 def create_motivation_keyboard():
     keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     button = telebot.types.KeyboardButton("Мотивация принята! 💖")
     keyboard.add(button)
     return keyboard
-
 
 # Команда /start
 @bot.message_handler(commands=['start'])
@@ -178,7 +190,7 @@ def send_welcome(message):
             f"Привет, моя любимая Олечка! 💖\n"
             f"Я буду с тобой всегда - днем и ночью! 🌞🌙\n"
             f"Мотивация в 10:00, а в течение дня - приятные сюрпризы! ✨\n"
-            f"Бот работает в АВТОНОМНОМ режиме 24/7! 🚀",
+            f"Бот работает в АВТОНОМНОМ режиме 24/7 на Replit! 🚀",
             reply_markup=create_main_keyboard()
         )
     else:
@@ -187,7 +199,6 @@ def send_welcome(message):
             "Привет! Этот бот создан специально для Ольги 💕",
             reply_markup=create_main_keyboard()
         )
-
 
 # Обработка кнопки "Информация"
 @bot.message_handler(func=lambda message: message.text == "Информация ℹ️")
@@ -223,7 +234,6 @@ def show_info(message):
     """
     bot.send_message(message.chat.id, info_text, reply_markup=create_main_keyboard())
 
-
 # Обработка кнопки "Мотивация принята!"
 @bot.message_handler(func=lambda message: message.text == "Мотивация принята! 💖")
 def accept_motivation(message):
@@ -258,7 +268,6 @@ def accept_motivation(message):
         f"{compliment}{milestone_message}",
         reply_markup=create_main_keyboard()
     )
-
 
 # Обработка кнопки "Проверить сердечки"
 @bot.message_handler(func=lambda message: message.text == "Проверить сердечки 💕")
@@ -301,7 +310,6 @@ def check_hearts(message):
         reply_markup=create_main_keyboard()
     )
 
-
 # Обработка триггерных сообщений
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
@@ -335,14 +343,13 @@ def handle_all_messages(message):
             reply_markup=create_main_keyboard()
         )
 
-
 # Функция для отправки сообщений по расписанию
 def send_scheduled_messages():
     last_sent_hours = {}  # Для отслеживания отправленных сообщений по часам
 
     while True:
         try:
-            now = datetime.utcnow()  # Используем UTC время для Render
+            now = datetime.utcnow()  # UTC время для Replit
             current_hour = now.hour
             current_minute = now.minute
 
@@ -351,7 +358,7 @@ def send_scheduled_messages():
                 if current_hour in TIME_MESSAGES and last_sent_hours.get(current_hour) != now.day:
                     logging.info(f"Отправка сообщения для времени {current_hour}:00 UTC")
 
-                    conn = sqlite3.connect('/tmp/hearts.db')
+                    conn = sqlite3.connect('hearts.db')
                     cursor = conn.cursor()
                     cursor.execute('SELECT user_id FROM users')
                     users = cursor.fetchall()
@@ -373,7 +380,7 @@ def send_scheduled_messages():
             if current_hour == 7 and current_minute == 0 and last_sent_hours.get('motivation') != now.day:
                 logging.info("Отправка ежедневных мотивационных сообщений...")
 
-                conn = sqlite3.connect('/tmp/hearts.db')
+                conn = sqlite3.connect('hearts.db')
                 cursor = conn.cursor()
                 cursor.execute('SELECT user_id FROM users')
                 users = cursor.fetchall()
@@ -397,11 +404,10 @@ def send_scheduled_messages():
             logging.error(f"Ошибка в scheduled_messages: {e}")
             time.sleep(60)
 
-
-# Запуск бота с обработкой ошибок
 def run_bot():
+    """Запуск бота"""
     try:
-        logging.info("Запуск бота в автономном режиме на Render...")
+        logging.info("Запуск бота в автономном режиме на Replit...")
         init_db()
 
         # Запускаем поток для расписания сообщений
@@ -409,10 +415,10 @@ def run_bot():
         schedule_thread.daemon = True
         schedule_thread.start()
 
-        logging.info("🤖 Бот запущен в АВТОНОМНОМ режиме 24/7 на Render!")
+        logging.info("🤖 Бот запущен в АВТОНОМНОМ режиме 24/7 на Replit!")
         print("=" * 60)
         print("🤖 БОТ ЗАПУЩЕН В АВТОНОМНОМ РЕЖИМЕ!")
-        print("💫 Теперь он будет работать постоянно на Render")
+        print("💫 Теперь он будет работать постоянно на Replit")
         print("🕐 Расписание (по Москве): 10:00, 14:00, 18:00, 20:00, 03:00")
         print("⏹️ Для остановки нажмите Ctrl+C")
         print("=" * 60)
@@ -429,6 +435,8 @@ def run_bot():
     except Exception as e:
         logging.error(f"Критическая ошибка бота: {e}")
 
-
 if __name__ == "__main__":
+    # Запускаем Flask сервер для поддержания активности
+    keep_alive()
+    # Запускаем бота
     run_bot()
