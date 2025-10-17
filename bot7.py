@@ -49,7 +49,9 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             hearts INTEGER DEFAULT 0,
             username TEXT,
-            last_daily_message TEXT
+            last_daily_message TEXT,
+            last_14_message TEXT,
+            last_18_message TEXT
         )
     ''')
     conn.commit()
@@ -82,6 +84,52 @@ def add_heart(user_id, username):
     conn.commit()
     conn.close()
     return hearts
+
+# Проверить, было ли сегодня сообщение в 14:00
+def was_14_message_sent_today(user_id):
+    conn = sqlite3.connect('hearts.db')
+    cursor = conn.cursor()
+    today = datetime.now().date()
+    cursor.execute('SELECT last_14_message FROM users WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    if result and result[0]:
+        last_date = datetime.strptime(result[0], '%Y-%m-%d').date()
+        conn.close()
+        return last_date == today
+    conn.close()
+    return False
+
+# Обновить дату последнего сообщения в 14:00
+def update_14_message_date(user_id):
+    conn = sqlite3.connect('hearts.db')
+    cursor = conn.cursor()
+    today = datetime.now().date().isoformat()
+    cursor.execute('UPDATE users SET last_14_message = ? WHERE user_id = ?', (today, user_id))
+    conn.commit()
+    conn.close()
+
+# Проверить, было ли сегодня сообщение в 18:00
+def was_18_message_sent_today(user_id):
+    conn = sqlite3.connect('hearts.db')
+    cursor = conn.cursor()
+    today = datetime.now().date()
+    cursor.execute('SELECT last_18_message FROM users WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    if result and result[0]:
+        last_date = datetime.strptime(result[0], '%Y-%m-%d').date()
+        conn.close()
+        return last_date == today
+    conn.close()
+    return False
+
+# Обновить дату последнего сообщения в 18:00
+def update_18_message_date(user_id):
+    conn = sqlite3.connect('hearts.db')
+    cursor = conn.cursor()
+    today = datetime.now().date().isoformat()
+    cursor.execute('UPDATE users SET last_18_message = ? WHERE user_id = ?', (today, user_id))
+    conn.commit()
+    conn.close()
 
 # Мотивационные фразы для Ольги (расширенный список)
 MOTIVATIONAL_PHRASES = [
@@ -139,7 +187,6 @@ MOTIVATIONAL_PHRASES = [
 
 # Сообщения для разных времен (UTC время для Replit)
 TIME_MESSAGES = {
-    7: "Я тебя люблю ❤️",           # 10:00 МСК
     11: "Ты самая яркая ✨",         # 14:00 МСК
     15: "Приятных тебе снов 🌙💫",  # 18:00 МСК  
     17: "Спокойной ночи, солнышко 😴", # 20:00 МСК
@@ -169,10 +216,24 @@ def create_main_keyboard():
     keyboard.add(button1, button2)
     return keyboard
 
-# Клавиатура для подтверждения мотивации
+# Клавиатура для подтверждения мотивации в 10:00
 def create_motivation_keyboard():
     keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     button = telebot.types.KeyboardButton("Мотивация принята! 💖")
+    keyboard.add(button)
+    return keyboard
+
+# Клавиатура для подтверждения в 14:00
+def create_14_keyboard():
+    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    button = telebot.types.KeyboardButton("Яркость принята! ✨")
+    keyboard.add(button)
+    return keyboard
+
+# Клавиатура для подтверждения в 18:00
+def create_18_keyboard():
+    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    button = telebot.types.KeyboardButton("Сны приняты! 🌙")
     keyboard.add(button)
     return keyboard
 
@@ -212,9 +273,9 @@ def show_info(message):
 • Отправляет сообщения автоматически
 
 🕐 **Расписание сообщений:**
-• 10:00 - Утренняя мотивация 💫
-• 14:00 - Приятное сообщение ❤️  
-• 18:00 - Вечерний комплимент ✨
+• 10:00 - Утренняя мотивация 💫 (+1 сердце)
+• 14:00 - Приятное сообщение ❤️ (+1 сердце)  
+• 18:00 - Вечерний комплимент ✨ (+1 сердце)
 • 20:00 - Пожелание на ночь 🌙
 • 03:00 - Ночное сообщение 😴
 
@@ -234,7 +295,7 @@ def show_info(message):
     """
     bot.send_message(message.chat.id, info_text, reply_markup=create_main_keyboard())
 
-# Обработка кнопки "Мотивация принята!"
+# Обработка кнопки "Мотивация принята!" (10:00)
 @bot.message_handler(func=lambda message: message.text == "Мотивация принята! 💖")
 def accept_motivation(message):
     user_id = message.from_user.id
@@ -264,8 +325,68 @@ def accept_motivation(message):
     bot.send_message(
         message.chat.id,
         f"Отлично! Мотивация принята! 💖\n"
-        f"Твой счёт: {hearts} сердец\n"
+        f"+1 сердечко! Твой счёт: {hearts} сердец\n"
         f"{compliment}{milestone_message}",
+        reply_markup=create_main_keyboard()
+    )
+
+# Обработка кнопки "Яркость принята!" (14:00)
+@bot.message_handler(func=lambda message: message.text == "Яркость принята! ✨")
+def accept_14_motivation(message):
+    user_id = message.from_user.id
+    username = message.from_user.first_name
+
+    # Проверяем, не получала ли она уже сердце сегодня за 14:00
+    if was_14_message_sent_today(user_id):
+        bot.send_message(
+            message.chat.id,
+            "Ты уже получала сердечко за это сообщение сегодня! 💫",
+            reply_markup=create_main_keyboard()
+        )
+        return
+
+    hearts = add_heart(user_id, username)
+    update_14_message_date(user_id)
+
+    # Проверка достижений
+    milestone_message = ""
+    if hearts % 50 == 0 and hearts > 0:
+        milestone_message = f"\n\n🎉 ПОЗДРАВЛЯЮ! Ты набрала {hearts} сердец! 🎉\nОбратись к мужу за подарком! 💝"
+
+    bot.send_message(
+        message.chat.id,
+        f"Прекрасно! Твоя яркость сияет! ✨\n"
+        f"+1 сердечко! Твой счёт: {hearts} сердец{milestone_message}",
+        reply_markup=create_main_keyboard()
+    )
+
+# Обработка кнопки "Сны приняты!" (18:00)
+@bot.message_handler(func=lambda message: message.text == "Сны приняты! 🌙")
+def accept_18_motivation(message):
+    user_id = message.from_user.id
+    username = message.from_user.first_name
+
+    # Проверяем, не получала ли она уже сердце сегодня за 18:00
+    if was_18_message_sent_today(user_id):
+        bot.send_message(
+            message.chat.id,
+            "Ты уже получала сердечко за это сообщение сегодня! 💫",
+            reply_markup=create_main_keyboard()
+        )
+        return
+
+    hearts = add_heart(user_id, username)
+    update_18_message_date(user_id)
+
+    # Проверка достижений
+    milestone_message = ""
+    if hearts % 50 == 0 and hearts > 0:
+        milestone_message = f"\n\n🎉 ПОЗДРАВЛЯЮ! Ты набрала {hearts} сердец! 🎉\nОбратись к мужу за подарком! 💝"
+
+    bot.send_message(
+        message.chat.id,
+        f"Замечательно! Приятных снов! 🌙\n"
+        f"+1 сердечко! Твой счёт: {hearts} сердец{milestone_message}",
         reply_markup=create_main_keyboard()
     )
 
@@ -365,11 +486,16 @@ def send_scheduled_messages():
                     conn.close()
 
                     message_text = TIME_MESSAGES[current_hour]
-
+                    
                     for user_tuple in users:
                         user_id = user_tuple[0]
                         try:
-                            bot.send_message(user_id, message_text, reply_markup=create_main_keyboard())
+                            if current_hour == 11:  # 14:00 МСК
+                                bot.send_message(user_id, message_text, reply_markup=create_14_keyboard())
+                            elif current_hour == 15:  # 18:00 МСК
+                                bot.send_message(user_id, message_text, reply_markup=create_18_keyboard())
+                            else:
+                                bot.send_message(user_id, message_text, reply_markup=create_main_keyboard())
                             logging.info(f"Сообщение в {current_hour}:00 UTC отправлено пользователю {user_id}")
                         except Exception as e:
                             logging.error(f"Ошибка отправки пользователю {user_id}: {e}")
@@ -378,7 +504,7 @@ def send_scheduled_messages():
 
             # Ежедневная мотивация в 7:00 UTC (10:00 МСК)
             if current_hour == 7 and current_minute == 0 and last_sent_hours.get('motivation') != now.day:
-                logging.info("Отправка ежедневных мотивационных сообщений...")
+                logging.info("Отправка утренней мотивации...")
 
                 conn = sqlite3.connect('hearts.db')
                 cursor = conn.cursor()
@@ -420,6 +546,7 @@ def run_bot():
         print("🤖 БОТ ЗАПУЩЕН В АВТОНОМНОМ РЕЖИМЕ!")
         print("💫 Теперь он будет работать постоянно на Replit")
         print("🕐 Расписание (по Москве): 10:00, 14:00, 18:00, 20:00, 03:00")
+        print("💝 Теперь можно получать сердечки в 10:00, 14:00 и 18:00!")
         print("⏹️ Для остановки нажмите Ctrl+C")
         print("=" * 60)
 
